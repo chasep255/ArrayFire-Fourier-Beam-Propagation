@@ -1,38 +1,18 @@
 #include <arrayfire.h>
 #include <iostream>
 #include <cmath>
-#include <unistd.h>
-#include <sys/time.h>
 #include "BeamPropagator.hpp"
-
-double prof_time()
-{
-	struct timeval now;
-	gettimeofday(&now, NULL);
-	return now.tv_sec + 1.0e-6 * now.tv_usec;
-}
 
 const int CELLS = 512;
 const float LAMBDA = 500.0e-9;
 const float DZ = LAMBDA;
 const float CELL_DIM = LAMBDA;
-const int RENDER_EVERY = 10;
+const int RENDER_EVERY = 15;
 
 struct MaskFunctor
 {
 	af::array operator()(double z)
 	{
-//		if(z < 0.02)
-//		{
-//			af::array wave_guide = af::constant(1.0, af::dim4(CELLS, CELLS));
-//			af::array r = af::range(CELLS / 2);
-//			r = af::join(0, af::flip(r, 0), r);
-//			r *= r;
-//			r = af::tile(r, 1, CELLS) + af::tile(r.T(), CELLS);
-//			
-//			wave_guide = 1.0 + 0.2 * (r < (200 * 200) * (0.02 - z) / 0.02);
-//			return wave_guide;
-//		}
 		return af::constant(1.0, af::dim4(CELLS, CELLS));
 	}
 };
@@ -63,11 +43,18 @@ int main()
 //		wnd.plot(af::range(c.dims(0)), af::abs(af::fft(c)));
 //	}
 	
+	MaskFunctor m;
+	
 	af::Window wnd(bp.getGridDim(), bp.getGridDim());
 	while(!wnd.close())
 	{
+		af::timer tm = af::timer::start();
 		for(int i = 0; i < RENDER_EVERY; i++)
-			bp.stepDynamic(DZ, MaskFunctor());
+			bp.stepDynamic(DZ, m);
+		af::sync();
+		double t = af::timer::stop(tm);
+		double steps_per_minute = RENDER_EVERY * 60 / t;
+		
 		af::array efld_mag = af::abs(bp.getElectricField());
 		af::array img(af::dim4(bp.getGridDim(), bp.getGridDim(), 3));
 		img(af::span, af::span, 0) = efld_mag;
@@ -76,7 +63,7 @@ int main()
 		
 		wnd.image(img);
 		
-		std::cout << bp.getZ() << std::endl;
+		std::cout << "z = " << bp.getZ() << "m \t Steps / Min = " << (int)steps_per_minute << std::endl;
 	}
 	return 0;
 }

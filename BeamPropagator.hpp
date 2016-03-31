@@ -66,7 +66,7 @@ class BeamPropagator
 	}
 	
 	template<typename MaskCallback>
-	void stepDynamic(real dz, MaskCallback n, real dn_limit = -1.0)
+	void stepDynamic(real dz, MaskCallback&& n, real dn_limit = -1.0)
 	{
 		af::array next_mask = n(z + dz);
 		int steps = 1;
@@ -133,7 +133,6 @@ class BeamPropagator
 		
 		double sigma = border_size / sigmas;
 		border_gain = af::exp(-border_gain * border_gain / (2.0 * sigma * sigma));
-		af::print("", border_gain);
 		border_gain = af::tile(border_gain, 1, n);
 		gain(af::span, af::seq(border_size)) = af::flip(border_gain.T(), 1);
 		gain(af::span, af::seq(n - border_size, n - 1, 1.0)) = border_gain.T();
