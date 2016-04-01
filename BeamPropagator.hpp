@@ -124,6 +124,11 @@ class BeamPropagator
 		return z;
 	}
 	
+	void setZ(double z)
+	{
+		this->z = z;
+	}
+	
 	void enableAbosrbingBoundaries(double boundary_percent = 0.05, double sigmas = 0.2)
 	{
 		clamp_boundaries = true;
