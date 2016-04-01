@@ -124,7 +124,7 @@ class BeamPropagator
 		return z;
 	}
 	
-	void enableAbosrbingBoundaries(double boundary_percent = 0.05, double sigmas = 0.3)
+	void enableAbosrbingBoundaries(double boundary_percent = 0.05, double sigmas = 0.2)
 	{
 		clamp_boundaries = true;
 		gain = af::constant(1.0, af::dim4(n, n));
@@ -133,6 +133,7 @@ class BeamPropagator
 		
 		double sigma = border_size / sigmas;
 		border_gain = af::exp(-border_gain * border_gain / (2.0 * sigma * sigma));
+		border_gain(-1) = 0.0;
 		border_gain = af::tile(border_gain, 1, n);
 		gain(af::span, af::seq(border_size)) = af::flip(border_gain.T(), 1);
 		gain(af::span, af::seq(n - border_size, n - 1, 1.0)) = border_gain.T();
