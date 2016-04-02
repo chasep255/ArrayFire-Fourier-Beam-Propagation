@@ -7,24 +7,7 @@
 #include <cmath>
 #include <limits>
 
-template<typename real>
-struct FpTypeTraits;
-
-template<>
-struct FpTypeTraits<double>
-{
-	static const af_dtype af_rtype = f64;
-	static const af_dtype af_ctype = c64;
-	typedef af::cdouble af_complex_t;
-};
-
-template<>
-struct FpTypeTraits<float>
-{
-	static const af_dtype af_rtype = f32;
-	static const af_dtype af_ctype = c32;
-	typedef af::cfloat af_complex_t;
-};
+#include "FpTypeTraits.hpp"
 
 template<typename real>
 class BeamPropagator

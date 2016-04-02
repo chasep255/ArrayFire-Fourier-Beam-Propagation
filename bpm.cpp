@@ -5,32 +5,27 @@
 #include <unistd.h>
 #include <cstring>
 
-const int CELLS = 256;
+const int CELLS = 512;
 const float LAMBDA = 500.0e-9;
-const float DZ = LAMBDA * 2;
+const float DZ = LAMBDA * 20;
 const float CELL_DIM = LAMBDA;
 const int RENDER_EVERY = 15;
-
-struct MaskFunctor
-{
-	af::array operator()(double z)
-	{
-		return af::constant(1.0, af::dim4(CELLS, CELLS));
-	}
-};
 
 int main()
 {
 	af::setBackend(AF_BACKEND_CUDA);
 	af::info();
 	
-	af::array efld = af::constant(0.0, af::dim4(CELLS, CELLS));
-	af::seq s(CELLS / 2 - 50, CELLS / 2 + 50);
-	efld(s, s) = 0.1;
+	//create gaussian beam initial condition for electric field
+	af::array efld = af::range(CELLS) - CELLS / 2;
+	efld *= efld;
+	efld = af::tile(efld, 1, CELLS) + af::tile(efld.T(), CELLS);
+	efld = af::exp(-efld / 600.0);
 	
+	
+	//create square cross section wave guide
 	af::array mask = af::constant(1.0, af::dim4(CELLS, CELLS));
 	int wg_border = 50;
-	
 	af::seq in_guide(wg_border - 1, CELLS - wg_border - 1);
 	mask(in_guide, in_guide) = 1.1;
 	
@@ -39,87 +34,96 @@ int main()
 	bp.setElectricField(efld);
 	bp.setMask(mask);
 	
-	double distance = 0.02;
+	double distance = 1.0;
 	int steps = distance / DZ;
 	std::cout << steps << std::endl;
 	af::array p(steps, c32);
 	int percent = steps / 100;
 	efld = af::conjg(efld);
+	
+	//propagate the first time to compute P(z)
 	int pcounter = 0;
 	for(int i = 0; i < steps; i++)
 	{
 		bp.step(DZ);
-		p(i) = af::sum<double>(efld(in_guide, in_guide) * bp.getElectricField()(in_guide, in_guide));
+		
+		//compute the correlation multiplied with the window function
+		p(i) = af::sum<double>(efld(in_guide, in_guide) * bp.getElectricField()(in_guide, in_guide)) * 
+				(1.0 - cos(2.0 * M_PI * (double)i / steps));
+		
 		if(i % percent == percent - 1)
 			std::cout << pcounter++ << std::endl;
 	}
 	
+	//FFT to go from P(z) -> P(beta)
 	af::fftInPlace(p);
-	p = af::abs(p);
-	p *= p > af::shift(p, -1) && p > af::shift(p, 1);
-	
+	//rotate it so zero is at the center
+	p = af::shift(p, steps / 2);
 	
 	af::Window w(2000, 1000);
 	while(!w.close())
+		w.plot(af::range(p.dims(0)) - p.dims(0) / 2, af::abs(p));
+	
+	//compute the magnitued of the cplx numbers
+	p = af::abs(p);
+	
+	//find local maxima (zero everything which is not a local max)
+	af::array bk_two = af::shift(p, -2);
+	af::array bk_one = af::shift(p, -1);
+	af::array fw_one = af::shift(p, 1);
+	af::array fw_two = af::shift(p, 2);
+	p *= p > bk_one && p > fw_one && fw_one >= fw_two && bk_one >= bk_two;
+	
+	//sort P(beta) storing the sorted indices in beta
+	af::array beta;
+	af::sort(p, beta, p, 0, false);
+	
+	beta = beta.as(f64);
+	
+	//shift beta to zero in the center
+	beta -= steps / 2;
+	//convert index numbers to frequency
+	beta *= 2.0 * af::Pi / (DZ * steps);
+	
+	
+	int nmodes = std::min(100, af::count<int>(p));
+	std::cout << "Modes Found: " << af::count<int>(p) << std::endl;
+	
+	//clip beta array since we only need the modes we will be computing eigenfunctions for
+	beta = beta(af::seq(nmodes));
+	
+	//reset bp
+	bp.setElectricField(af::conjg(efld));
+	bp.setZ(0);
+	
+	//array of eigenfunctions
+	af::array modes = af::constant(0.0, af::dim4(CELLS, CELLS, nmodes), c64);
+	pcounter = 0;
+	
+	//compute the eignenfunctions
+	for(int i = 0; i < steps; i++)
 	{
-		w.plot(af::range(steps), p.as(f32));
+		bp.step(DZ);
+		const af::array& e = bp.getElectricField();
+		af::array phi = af::exp(beta.as(c64) * af::cdouble(0, 1) * bp.getZ());
+		
+		//equation (22) for each of the desired modes
+		gfor(af::seq j, nmodes)
+			modes(af::span, af::span, j) += e * (1.0 - cos(2.0 * M_PI * (double)i / steps)) * 
+				af::tile(phi(j), e.dims());
+		
+		if(i % percent == percent - 1)
+			std::cout << pcounter++ << std::endl;
 	}
 	
-
-//	
-//	af::array max_values, max_idx;
-//	af::max(max_values, max_idx, p(af::seq(p.dims(0) / 2)));
-//	max_idx = 2.0 * M_PI * max_idx.as(f32) / (DZ * p.dims(0));
-//	af::print("", af::join(1, max_values.as(f32), max_idx));
-//	
-//	double beta = max_idx.scalar<float>();
-//	bp.setZ(0);
-//	bp.setElectricField(af::conjg(efld));
-//	
-//	af::array mode = af::constant(0.0, af::dim4(in_guide.size, in_guide.size), c64);
-//	
-//	pcounter = 0;
-//	for(int i = 0; i < steps; i++)
-//	{
-//		bp.step(DZ);
-//		std::complex<double> f = std::exp(beta * std::complex<double>(0, 1) * bp.getZ());
-//		mode += bp.getElectricField()(in_guide, in_guide) * af::cdouble(f.real(), f.imag());
-//		if(i % percent == percent - 1)
-//			std::cout << pcounter++ << std::endl;
-//	}
-//	
-//	af::Window w(in_guide.size, in_guide.size);
-//	mode = af::abs(mode);
-//	while(!w.close())
-//	{
-//		w.image(mode.as(f32) / af::max<double>(mode));
-//	}
-	//w.plot(2.0 * M_PI * af::range(p.dims(0)) / (DZ * p.dims(0)), af::log(p.as(f32)));
-	
-//	int nframes = 200;
-//	af::array data(CELLS, CELLS, nframes, c32);
-//	for(int i = 0; i < nframes; i++)
-//	{
-//		bp.step(DZ);
-//		data(af::span, af::span, i) = bp.getElectricField();
-//	}
-//				
-//	data = af::reorder(data, 2, 0, 1); //make z the first dim
-//	af::fftInPlace(data); //fft along the first dimension only which is z
-//	data = af::reorder(data, 1, 2, 0); //make z the last dim
-//	
-//	af::Window wnd(CELLS, CELLS);
-//	for(int i = 0; i < nframes && !wnd.close(); i++)
-//	{
-//		af::array img = af::arg(data(af::span, af::span, i));
-//		img -= af::min<float>(img);
-//		img /= af::max<float>(img);
-//		wnd.image(img);
-//		char fn[100];
-//		sprintf(fn, "images/%d.jpg", i);
-//		af::saveImage(fn, img);
-//		usleep(100000);
-//	}
+	for(int i = 0; i < nmodes; i++)
+	{
+		af::array img = af::abs(modes.slice(i)).as(f32);
+		img /= af::max<float>(img);
+		char file_name[200];
+		sprintf(file_name, "images/%03d.jpg", i);
+		af::saveImage(file_name, img);
+	}
 
 //	af::Window wnd(bp.getGridDim(), bp.getGridDim());
 //	while(!wnd.close())
