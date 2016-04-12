@@ -22,6 +22,8 @@ class BeamPropagator
 	
 	typedef typename FpTypeTraits<real>::af_complex_t complex_t;
 	
+	BeamPropagator() { }
+	
 	BeamPropagator(size_t _n, real _cell_size, real _lambda) :
 		n(_n), cell_size(_cell_size), lambda(_lambda), z(0)
 	{
@@ -37,11 +39,18 @@ class BeamPropagator
 	void step(real dz)
 	{
 		af_complex_t i(0, 1);
+		//refraction
 		electric_field *= af::exp(-dz * i * (2 * M_PI / lambda) * mask);
+		
+		//forward FFT
 		af::fft2InPlace(electric_field);
+		//diffraction
 		electric_field *= af::exp(-dz * i * kz);
+		
+		//inverse FFT
 		af::ifft2InPlace(electric_field);
 		
+		//absorbing boundary conditions
 		if(clamp_boundaries)
 			electric_field *= gain;
 		
@@ -51,15 +60,20 @@ class BeamPropagator
 	template<typename MaskCallback>
 	void stepDynamic(real dz, MaskCallback&& n, real dn_limit = -1.0)
 	{
+		//get the next mask using the user provided call back function
 		af::array next_mask = n(z + dz);
+		//compute the number of sub steps
 		int steps = 1;
+		//check if dynamic step sizes are enabled
 		if(dn_limit > 0)
 		{
 			af::array dn = af::abs(next_mask - mask);
+			//find worst case dn
 			real max_dn = af::max<real>(dn);
+			//compute number of sub-steps needed
 			steps = std::max((real)1, std::ceil(max_dn / dn_limit));
 		}
-		
+		//adjust step size
 		real step_size = dz / steps;
 		for(int s = 0; s < steps; s++)
 		{
