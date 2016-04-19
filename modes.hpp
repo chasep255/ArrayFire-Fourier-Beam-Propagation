@@ -24,6 +24,7 @@ af::array modesComputeSpectrum(const ModesAnalysisConfig& cfg)
 	typedef FpTypeTraits<real> tt;
 	//set up a BeamPropagator
 	BeamPropagator<real> bp(cfg.cell_count, cfg.cell_dim, cfg.lambda);
+	bp.enableAbosrbingBoundaries();
 	bp.setMask(cfg.mask);
 	bp.setElectricField(cfg.initial_field);
 	//array to store P(z)
@@ -36,9 +37,10 @@ af::array modesComputeSpectrum(const ModesAnalysisConfig& cfg)
 		//perform a step
 		bp.step(cfg.dz);
 		//compute the correlation function by numerically integrating
-		p(s) = af::sum<double>(e_conj * bp.getElectricField() * cfg.in_guide) *
+		p(s) = af::sum<af::cdouble>(e_conj * bp.getElectricField() * cfg.in_guide) *
 					(1.0 - cos(2.0 * M_PI * (double)s / cfg.steps));
 	}
+
 	//return the magnitude of the FFT, also truncate the negative betas
 	return af::abs(af::fft(p)(af::seq(cfg.steps / 2)));
 }
@@ -59,6 +61,7 @@ af::array modesComputeFunctions(const ModesAnalysisConfig& cfg, af::array betas)
 	BeamPropagator<real> bp(cfg.cell_count, cfg.cell_dim, cfg.lambda);
 	bp.setMask(cfg.mask);
 	bp.setElectricField(cfg.initial_field);
+	bp.enableAbosrbingBoundaries();
 	//3D matrix where each 2D slice stores an eigenfunction being calculated
 	af::array modes = af::constant(0.0, af::dim4(cfg.cell_count, cfg.cell_count, betas.elements()), c64);
 	for(long s = 0; s < cfg.steps; s++)

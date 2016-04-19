@@ -10,14 +10,13 @@
 #include <memory>
 
 const int CELLS = 256;
-const float LAMBDA = 500.0e-9;
-const float DZ = LAMBDA * 4.24234;
+const float LAMBDA = 1000.0e-9;
+const float DZ = LAMBDA;
 const float CELL_DIM = LAMBDA;
 const int RENDER_EVERY = 30;
 
 void displayModalSpectrum(af::array p)
 {
-	p = p.as(f32);
 	float avg = af::mean<float>(p);
 	float* ph = p.host<float>();
 	int lbound = 0, ubound = p.dims(0) - 1;
@@ -55,7 +54,7 @@ void displayTiledModes(const ModesAnalysisConfig& cfg, af::array modes)
 	{
 		for(int i = 0; i < modes.dims(2); i++)
 		{
-			bps[i].step(cfg.dz * 0.89645);
+			bps[i].step(cfg.dz);
 		}
 		for(int i = 0; i < modes.dims(2); i++)
 		{
@@ -71,65 +70,55 @@ int main()
 	af::setBackend(AF_BACKEND_CUDA);
 	af::info();
 	
-	af::array efld = af::range(CELLS) - CELLS / 2;
-	efld *= efld;
-	efld = af::tile(efld, 1, CELLS) + af::tile(efld.T(), CELLS);
-	efld = af::exp(-efld / 1000.0);
+//	af::array efld = af::range(CELLS) - CELLS / 2;
+//	
+//	efld *= efld;
+//	efld = af::tile(efld, 1, CELLS) + af::tile(efld.T(), CELLS);
+//	efld = af::exp(-efld / 1000.0);
 	
+//	//double square
 //	af::array efld = af::constant(0.0, af::dim4(CELLS, CELLS));
 //	efld(af::seq(90, 166), af::seq(90, 166)) = 1.0;
 //	efld(af::seq(100, 156), af::seq(100, 156)) = 0.0;
-	
-//	af::array efld = af::constant(0.0, af::dim4(CELLS, CELLS));
-//	efld(af::seq(90, 166), af::seq(90, 166)) = 1.0;
-//	efld(af::seq(100, 156), af::seq(100, 156)) = 0.0;
+
+  //CROSS
+	af::array efld = af::constant(0.0, af::dim4(CELLS, CELLS));
+	efld(af::seq(115, 141), af::seq(90, 166)) = 1.0;
+	efld(af::seq(90, 166), af::seq(115, 141)) = 1.0;
 	
 	af::array mask = af::constant(1.45, af::dim4(CELLS, CELLS));
 	af::seq in_guide(49, CELLS - 50);
 	mask(in_guide, in_guide) = 1.46;
 	
-	//efld(in_guide, in_guide) = af::randu(af::dim4(in_guide.size, in_guide.size));
+//	af::array mask = af::range(CELLS) - CELLS / 2;
+//	mask *= mask;
+//	mask = af::tile(mask, 1, CELLS) + af::tile(mask.T(), CELLS);
+//	mask = af::select(mask < 100.0 * 100.0, af::constant(1.456, mask.dims()), af::constant(1.455, mask.dims()));
+//	af::print("", mask);
+	
+//	efld = af::constant(0, af::dim4(CELLS, CELLS));
+//	af::array shark = af::resize(af::loadImage("shark.jpg", false), in_guide.size, in_guide.size);
+//	efld(in_guide, in_guide) = shark;
+		
+	BeamPropagator<float> bp(CELLS, LAMBDA, CELL_DIM);
+	bp.setElectricField(efld);
+	bp.enableAbosrbingBoundaries();
+	bp.setMask(mask);
 	
 	af::Window wnd(CELLS, CELLS);
-	while(!wnd.close())
+	
+	while(!wnd.close() && bp.getZ() < 0.5)
 	{
-		wnd.image(efld);
-	}
-	
-	ModesAnalysisConfig cfg;
-	cfg.dz = DZ;
-	cfg.steps = std::ceil(0.1 / DZ);
-	cfg.cell_dim = CELL_DIM;
-	cfg.cell_count = CELLS;
-	cfg.initial_field = efld;
-	cfg.lambda = LAMBDA;
-	cfg.mask = mask;
-	cfg.in_guide = af::constant(0, af::dim4(CELLS, CELLS));
-	cfg.in_guide(in_guide, in_guide) = 1;
-	
-	af::array spectrum = modesComputeSpectrum<double>(cfg);
-	displayModalSpectrum(spectrum);
-	
-	spectrum *= spectrum > af::shift(spectrum, -1) && spectrum > af::shift(spectrum, 1);
-	af::array betas;
-	af::sort(spectrum, betas, spectrum, 0, false);
-	
-	int nmodes = 20;
-	nmodes = std::min(nmodes, af::count<int>(spectrum));
-	spectrum = af::array();
-	betas = betas(af::seq(nmodes));
-	betas = modesSpectralIndexToBeta(betas, cfg);
-	
-	af::array modes = modesComputeFunctions<double>(cfg, betas);
-	displayTiledModes(cfg, modes);
-	
-	for(int i = 0; i < nmodes; i++)
-	{
-		af::array img = af::abs(modes.slice(i)).as(f32);
-		img /= af::max<float>(img);
+		af::array ef = af::abs(bp.getElectricField()).as(f32);
+		ef /= af::max<float>(ef);
+		wnd.image(ef);
 		char fn[100];
-		sprintf(fn, "images/mode_%f.jpg", betas(i).scalar<float>());
-		af::saveImage(fn, img);
+		std::sprintf(fn, "images/img%lf.png", bp.getZ());
+		af::saveImage(fn, ef);
+		for(int i = 0; i < 20; i++)
+			bp.step(DZ);
+		
 	}
+	
 	return 0;
 }

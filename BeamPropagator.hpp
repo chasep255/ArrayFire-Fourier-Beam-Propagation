@@ -29,23 +29,25 @@ class BeamPropagator
 	{
 		electric_field = af::constant(0.0, af::dim4(n, n), ctype);
 		mask = af::constant(1.0, af::dim4(n, n), ctype);
-		
-		real k0 = 2 * real(M_PI) / lambda;
 		af::array rng = af::range(n);
 		af::array k = 2.0 * af::Pi * af::select(rng > n / 2, (rng - n) , rng) / (n * cell_size);
+		real k0 = 2 * real(M_PI) / lambda;
 		kz = af::sqrt(af::constant(k0 * k0, af::dim4(n, n)) - af::tile((k * k).T(), n) - af::tile(k * k, 1, n));
 	}
 	
 	void step(real dz)
 	{
 		af_complex_t i(0, 1);
+		
+		real n0 = af::min<real>(mask);
 		//refraction
-		electric_field *= af::exp(-dz * i * (2 * M_PI / lambda) * mask);
+		electric_field *= af::exp(-dz * i * (2 * M_PI / lambda) * (mask - n0));
 		
 		//forward FFT
 		af::fft2InPlace(electric_field);
+		
 		//diffraction
-		electric_field *= af::exp(-dz * i * kz);
+		electric_field *= af::exp(-dz * i * kz * n0);
 		
 		//inverse FFT
 		af::ifft2InPlace(electric_field);
@@ -126,7 +128,7 @@ class BeamPropagator
 		this->z = z;
 	}
 	
-	void enableAbosrbingBoundaries(double boundary_percent = 0.05, double sigmas = 0.2)
+	void enableAbosrbingBoundaries(double boundary_percent = 0.05, double sigmas = 0.3)
 	{
 		clamp_boundaries = true;
 		gain = af::constant(1.0, af::dim4(n, n));
@@ -135,7 +137,6 @@ class BeamPropagator
 		
 		double sigma = border_size / sigmas;
 		border_gain = af::exp(-border_gain * border_gain / (2.0 * sigma * sigma));
-		border_gain(-1) = 0.0;
 		border_gain = af::tile(border_gain, 1, n);
 		gain(af::span, af::seq(border_size)) = af::flip(border_gain.T(), 1);
 		gain(af::span, af::seq(n - border_size, n - 1, 1.0)) = border_gain.T();
